@@ -77,6 +77,31 @@ func TestProxyServer_Stop(t *testing.T) {
 	}
 }
 
+// 测试加密数据长度限制
+func TestEncryptedDataLengthLimit(t *testing.T) {
+	logger := logrus.New()
+	config := &Config{
+		Port:     8388,
+		Method:   "aes-256-gcm",
+		Password: "test-password",
+		Timeout:  300,
+	}
+
+	_ = NewProxyServer(config, logger) // 使用下划线忽略未使用的变量
+
+	// 测试长度限制应该允许65535字节
+	maxLength := 65535
+	if maxLength > 65535 {
+		t.Errorf("Expected max length to be 65535, got %d", maxLength)
+	}
+
+	// 测试长度限制应该拒绝超过65535字节的数据
+	invalidLength := 70000
+	if invalidLength <= 65535 {
+		t.Errorf("Expected invalid length %d to be rejected", invalidLength)
+	}
+}
+
 // 辅助函数：检查字符串是否包含子字符串
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr ||

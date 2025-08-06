@@ -94,6 +94,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Implemented proper encryption/decryption
 - Added threat detection mechanisms
 
+## [未发布]
+
+### 修复
+- 修复了代理连接中"invalid encrypted data length"错误
+  - 将加密数据长度限制从4096字节增加到65535字节
+  - 增加了缓冲区大小从4096字节到8192字节
+  - 解决了6808字节等大数据包被拒绝的问题
+
+### 技术改进
+- 优化了代理服务器的数据处理能力
+- 提高了对大型加密数据包的兼容性
+
 ---
 
 ## Version History

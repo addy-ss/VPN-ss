@@ -142,7 +142,7 @@ func (p *SecureProxyServer) readEncryptedTarget(conn net.Conn) ([]byte, error) {
 	}
 
 	length := int(lengthBuf[0])<<24 | int(lengthBuf[1])<<16 | int(lengthBuf[2])<<8 | int(lengthBuf[3])
-	if length <= 0 || length > 4096 { // 限制最大长度
+	if length <= 0 || length > 65535 { // 增加最大长度限制到65535字节
 		return nil, fmt.Errorf("invalid encrypted data length: %d", length)
 	}
 
@@ -160,7 +160,7 @@ func (p *SecureProxyServer) forwardEncrypted(src, dst net.Conn, clientIP string)
 
 	// 从源到目标（解密）
 	go func() {
-		buffer := make([]byte, 4096)
+		buffer := make([]byte, 8192) // 增加缓冲区大小到8192字节
 		for {
 			n, err := src.Read(buffer)
 			if err != nil {
@@ -186,7 +186,7 @@ func (p *SecureProxyServer) forwardEncrypted(src, dst net.Conn, clientIP string)
 
 	// 从目标到源（加密）
 	go func() {
-		buffer := make([]byte, 4096)
+		buffer := make([]byte, 8192) // 增加缓冲区大小到8192字节
 		for {
 			n, err := dst.Read(buffer)
 			if err != nil {

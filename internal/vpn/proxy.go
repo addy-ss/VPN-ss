@@ -152,7 +152,7 @@ func (p *ProxyServer) readDecryptedTarget(conn net.Conn, decryptor cipher.AEAD) 
 	}
 
 	length := int(lengthBuf[0])<<8 | int(lengthBuf[1])
-	if length <= 0 || length > 4096 {
+	if length <= 0 || length > 65535 { // 增加最大长度限制到65535字节
 		return "", fmt.Errorf("invalid encrypted data length: %d", length)
 	}
 
@@ -237,7 +237,7 @@ func (p *ProxyServer) forwardEncrypted(src, dst net.Conn, decryptor cipher.AEAD)
 			}
 
 			length := int(lengthBuf[0])<<8 | int(lengthBuf[1])
-			if length <= 0 || length > 4096 {
+			if length <= 0 || length > 65535 { // 增加最大长度限制到65535字节
 				errChan <- fmt.Errorf("invalid encrypted data length: %d", length)
 				return
 			}
@@ -266,7 +266,7 @@ func (p *ProxyServer) forwardEncrypted(src, dst net.Conn, decryptor cipher.AEAD)
 
 	// 从目标到源（加密）
 	go func() {
-		buffer := make([]byte, 4096)
+		buffer := make([]byte, 8192) // 增加缓冲区大小到8192字节
 		for {
 			n, err := dst.Read(buffer)
 			if err != nil {
