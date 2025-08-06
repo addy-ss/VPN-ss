@@ -26,6 +26,16 @@ type ShadowsocksConfig struct {
 	Password string `mapstructure:"password"`
 	Port     int    `mapstructure:"port"`
 	Timeout  int    `mapstructure:"timeout"`
+	// 连接监控设置
+	ConnectionMonitoring ConnectionMonitoringConfig `mapstructure:"connection_monitoring"`
+}
+
+type ConnectionMonitoringConfig struct {
+	Enabled                  bool `mapstructure:"enabled"`
+	LogFailedConnections     bool `mapstructure:"log_failed_connections"`
+	LogSuccessfulConnections bool `mapstructure:"log_successful_connections"`
+	MaxConnectionRetries     int  `mapstructure:"max_connection_retries"`
+	ConnectionTimeoutSeconds int  `mapstructure:"connection_timeout_seconds"`
 }
 
 type LogConfig struct {
@@ -62,6 +72,13 @@ func setDefaults() {
 	viper.SetDefault("shadowsocks.method", "aes-256-gcm")
 	viper.SetDefault("shadowsocks.port", 8388)
 	viper.SetDefault("shadowsocks.timeout", 300)
+
+	// 连接监控默认设置
+	viper.SetDefault("shadowsocks.connection_monitoring.enabled", true)
+	viper.SetDefault("shadowsocks.connection_monitoring.log_failed_connections", true)
+	viper.SetDefault("shadowsocks.connection_monitoring.log_successful_connections", false)
+	viper.SetDefault("shadowsocks.connection_monitoring.max_connection_retries", 3)
+	viper.SetDefault("shadowsocks.connection_monitoring.connection_timeout_seconds", 60)
 
 	viper.SetDefault("log.level", "info")
 }

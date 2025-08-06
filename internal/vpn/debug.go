@@ -1,78 +1,111 @@
 package vpn
 
 import (
-	"encoding/hex"
-	"io"
+	"fmt"
 	"net"
 	"time"
 
 	"github.com/sirupsen/logrus"
 )
 
-// DebugConnection 调试连接信息
-type DebugConnection struct {
-	conn   net.Conn
+// ConnectionDiagnostics 连接诊断工具
+type ConnectionDiagnostics struct {
 	logger *logrus.Logger
 }
 
-// NewDebugConnection 创建调试连接
-func NewDebugConnection(conn net.Conn, logger *logrus.Logger) *DebugConnection {
-	return &DebugConnection{
-		conn:   conn,
+// NewConnectionDiagnostics 创建连接诊断工具
+func NewConnectionDiagnostics(logger *logrus.Logger) *ConnectionDiagnostics {
+	return &ConnectionDiagnostics{
 		logger: logger,
 	}
 }
 
-// DebugReadLength 调试读取长度字段
-func (d *DebugConnection) DebugReadLength(lengthBytes int) ([]byte, error) {
-	lengthBuf := make([]byte, lengthBytes)
+// DiagnoseConnection 诊断连接问题
+func (cd *ConnectionDiagnostics) DiagnoseConnection(clientIP string, errorMsg string) {
+	cd.logger.WithFields(logrus.Fields{
+		"client_ip": clientIP,
+		"error":     errorMsg,
+		"timestamp": time.Now().UTC(),
+	}).Warn("Connection diagnosis triggered")
 
-	// 设置读取超时
-	d.conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	// 分析错误类型
+	if cd.isEOFError(errorMsg) {
+		cd.logger.WithFields(logrus.Fields{
+			"client_ip":  clientIP,
+			"issue":      "unexpected_eof",
+			"suggestion": "Client connection was closed unexpectedly. This may be due to network issues, client timeout, or malformed requests.",
+		}).Info("EOF error detected")
+	}
 
-	n, err := io.ReadFull(d.conn, lengthBuf)
+	if cd.isTimeoutError(errorMsg) {
+		cd.logger.WithFields(logrus.Fields{
+			"client_ip":  clientIP,
+			"issue":      "timeout",
+			"suggestion": "Connection timed out. Consider increasing timeout values or checking network stability.",
+		}).Info("Timeout error detected")
+	}
+
+	if cd.isLengthError(errorMsg) {
+		cd.logger.WithFields(logrus.Fields{
+			"client_ip":  clientIP,
+			"issue":      "invalid_length",
+			"suggestion": "Invalid data length received. This may indicate a protocol mismatch or corrupted data.",
+		}).Info("Length error detected")
+	}
+}
+
+// isEOFError 检查是否是EOF错误
+func (cd *ConnectionDiagnostics) isEOFError(errorMsg string) bool {
+	return stringContains(errorMsg, "EOF") || stringContains(errorMsg, "connection closed")
+}
+
+// isTimeoutError 检查是否是超时错误
+func (cd *ConnectionDiagnostics) isTimeoutError(errorMsg string) bool {
+	return stringContains(errorMsg, "timeout") || stringContains(errorMsg, "deadline exceeded")
+}
+
+// isLengthError 检查是否是长度错误
+func (cd *ConnectionDiagnostics) isLengthError(errorMsg string) bool {
+	return stringContains(errorMsg, "invalid") && stringContains(errorMsg, "length")
+}
+
+// TestConnection 测试连接
+func (cd *ConnectionDiagnostics) TestConnection(host string, port int) error {
+	addr := fmt.Sprintf("%s:%d", host, port)
+	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
 	if err != nil {
-		d.logger.Errorf("Debug: Failed to read length field: %v (read %d bytes)", err, n)
-		return nil, err
+		return fmt.Errorf("failed to connect to %s: %v", addr, err)
 	}
+	defer conn.Close()
 
-	d.logger.Infof("Debug: Read length field: %s (hex)", hex.EncodeToString(lengthBuf))
-	return lengthBuf, nil
+	cd.logger.WithFields(logrus.Fields{
+		"host": host,
+		"port": port,
+	}).Info("Connection test successful")
+
+	return nil
 }
 
-// DebugReadData 调试读取数据
-func (d *DebugConnection) DebugReadData(length int) ([]byte, error) {
-	data := make([]byte, length)
-
-	// 设置读取超时
-	d.conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-
-	n, err := io.ReadFull(d.conn, data)
-	if err != nil {
-		d.logger.Errorf("Debug: Failed to read data: %v (read %d/%d bytes)", err, n, length)
-		return nil, err
-	}
-
-	d.logger.Infof("Debug: Read data: %d bytes", n)
-	return data, nil
-}
-
-// DebugConnectionInfo 调试连接信息
-func DebugConnectionInfo(conn net.Conn, logger *logrus.Logger) {
-	logger.Infof("Debug: New connection from %s", conn.RemoteAddr().String())
-	logger.Infof("Debug: Local address: %s", conn.LocalAddr().String())
-
-	// 设置连接属性
-	if tcpConn, ok := conn.(*net.TCPConn); ok {
-		tcpConn.SetKeepAlive(true)
-		tcpConn.SetKeepAlivePeriod(30 * time.Second)
-		logger.Infof("Debug: TCP keep-alive enabled")
+// GetConnectionStats 获取连接统计信息
+func (cd *ConnectionDiagnostics) GetConnectionStats() map[string]interface{} {
+	// 这里可以添加连接统计信息的收集
+	// 例如：成功连接数、失败连接数、平均响应时间等
+	return map[string]interface{}{
+		"timestamp": time.Now().UTC(),
+		"status":    "monitoring_enabled",
 	}
 }
 
-// DebugProtocolVersion 调试协议版本
-func DebugProtocolVersion(data []byte, logger *logrus.Logger) {
-	if len(data) >= 4 {
-		logger.Infof("Debug: Protocol data: %s (hex)", hex.EncodeToString(data[:4]))
-	}
+// stringContains 检查字符串是否包含子字符串
+func stringContains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) &&
+		(s[:len(substr)] == substr || s[len(s)-len(substr):] == substr ||
+			func() bool {
+				for i := 0; i <= len(s)-len(substr); i++ {
+					if s[i:i+len(substr)] == substr {
+						return true
+					}
+				}
+				return false
+			}()))
 }

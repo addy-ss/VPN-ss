@@ -22,6 +22,13 @@ func SetupRoutes(router *gin.Engine, logger *logrus.Logger) {
 			vpn.GET("/methods", vpnHandler.GetSupportedMethods)
 		}
 
+		// 诊断端点
+		diagnose := v1.Group("/diagnose")
+		{
+			diagnose.POST("/connection", vpnHandler.DiagnoseConnection)
+			diagnose.GET("/stats", vpnHandler.GetConnectionStats)
+		}
+
 		// 健康检查
 		v1.GET("/health", vpnHandler.HealthCheck)
 	}
@@ -39,6 +46,10 @@ func SetupRoutes(router *gin.Engine, logger *logrus.Logger) {
 					"status":          "/api/v1/vpn/status",
 					"generate_config": "/api/v1/vpn/config/generate",
 					"methods":         "/api/v1/vpn/methods",
+				},
+				"diagnose": gin.H{
+					"connection": "/api/v1/diagnose/connection",
+					"stats":      "/api/v1/diagnose/stats",
 				},
 			},
 		})

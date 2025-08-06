@@ -24,6 +24,18 @@ shadowsocks:
   port: 8388
   # 连接超时时间（秒）
   timeout: 300
+  # 连接监控设置
+  connection_monitoring:
+    # 是否启用连接监控
+    enabled: true
+    # 是否记录失败的连接
+    log_failed_connections: true
+    # 是否记录成功的连接
+    log_successful_connections: false
+    # 最大连接重试次数
+    max_connection_retries: 3
+    # 连接超时时间（秒）
+    connection_timeout_seconds: 60
 
 log:
   # 日志级别: debug, info, warn, error

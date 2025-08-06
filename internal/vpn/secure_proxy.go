@@ -90,17 +90,36 @@ func (p *SecureProxyServer) handleSecureConnection(conn net.Conn) {
 	clientIP := security.GetClientIP(conn.RemoteAddr().String())
 	p.logger.Infof("New secure connection from %s", clientIP)
 
+	// 设置连接属性（如果是TCP连接）
+	if tcpConn, ok := conn.(*net.TCPConn); ok {
+		tcpConn.SetKeepAlive(true)
+		tcpConn.SetKeepAlivePeriod(30 * time.Second)
+		tcpConn.SetLinger(0) // 立即关闭连接
+	}
+
 	// 设置初始超时时间（给客户端更多时间发送数据）
 	initialTimeout := time.Duration(30) * time.Second
 	conn.SetDeadline(time.Now().Add(initialTimeout))
 
 	// 处理加密代理连接
 	if err := p.handleSecureProxy(conn, clientIP); err != nil {
-		p.logger.Errorf("Failed to handle secure proxy connection from %s: %v", clientIP, err)
+		// 记录详细的错误信息
+		p.logger.WithFields(logrus.Fields{
+			"client_ip": clientIP,
+			"error":     err.Error(),
+			"time":      time.Now().UTC(),
+		}).Errorf("Failed to handle secure proxy connection from %s: %v", clientIP, err)
+
 		// 记录可疑活动
 		p.auditLogger.LogSuspiciousActivity(clientIP, "proxy_error", map[string]interface{}{
 			"error": err.Error(),
+			"time":  time.Now().UTC(),
 		})
+	} else {
+		p.logger.WithFields(logrus.Fields{
+			"client_ip": clientIP,
+			"duration":  time.Since(time.Now()),
+		}).Infof("Secure proxy connection from %s completed successfully", clientIP)
 	}
 }
 
@@ -135,11 +154,18 @@ func (p *SecureProxyServer) handleSecureProxy(conn net.Conn, clientIP string) er
 }
 
 func (p *SecureProxyServer) readEncryptedTarget(conn net.Conn) ([]byte, error) {
+	// 设置读取超时，防止长时间等待
+	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+
 	// 读取加密数据长度
 	lengthBuf := make([]byte, 4)
 	if _, err := io.ReadFull(conn, lengthBuf); err != nil {
 		if err == io.EOF {
 			return nil, fmt.Errorf("connection closed by client before reading length: %v", err)
+		}
+		// 检查是否是超时错误
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			return nil, fmt.Errorf("timeout reading length field: %v", err)
 		}
 		return nil, fmt.Errorf("failed to read length field: %v", err)
 	}
@@ -149,14 +175,29 @@ func (p *SecureProxyServer) readEncryptedTarget(conn net.Conn) ([]byte, error) {
 		return nil, fmt.Errorf("invalid encrypted data length: %d", length)
 	}
 
+	// 重置读取超时，给更多时间读取数据
+	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+
 	// 读取加密数据
 	encryptedData := make([]byte, length)
-	if _, err := io.ReadFull(conn, encryptedData); err != nil {
-		if err == io.EOF {
-			return nil, fmt.Errorf("connection closed by client while reading encrypted data (expected %d bytes): %v", length, err)
+	bytesRead := 0
+	for bytesRead < length {
+		n, err := conn.Read(encryptedData[bytesRead:])
+		if err != nil {
+			if err == io.EOF {
+				return nil, fmt.Errorf("connection closed by client while reading encrypted data (read %d/%d bytes): %v", bytesRead, length, err)
+			}
+			// 检查是否是超时错误
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				return nil, fmt.Errorf("timeout reading encrypted data (read %d/%d bytes): %v", bytesRead, length, err)
+			}
+			return nil, fmt.Errorf("failed to read encrypted data (read %d/%d bytes): %v", bytesRead, length, err)
 		}
-		return nil, fmt.Errorf("failed to read encrypted data (expected %d bytes): %v", length, err)
+		bytesRead += n
 	}
+
+	// 重置读取超时，恢复正常模式
+	conn.SetReadDeadline(time.Time{})
 
 	return encryptedData, nil
 }

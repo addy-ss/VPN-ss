@@ -149,3 +149,53 @@ func (h *VPNHandler) HealthCheck(c *gin.Context) {
 		"service": "vps-vpn",
 	})
 }
+
+// 诊断连接问题
+func (h *VPNHandler) DiagnoseConnection(c *gin.Context) {
+	var request struct {
+		Host string `json:"host" binding:"required"`
+		Port int    `json:"port" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Invalid request parameters",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// 创建诊断工具
+	diagnostics := vpn.NewConnectionDiagnostics(h.logger)
+
+	// 测试连接
+	if err := diagnostics.TestConnection(request.Host, request.Port); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Connection test failed",
+			"details": err.Error(),
+			"host":    request.Host,
+			"port":    request.Port,
+		})
+		return
+	}
+
+	// 获取连接统计
+	stats := diagnostics.GetConnectionStats()
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Connection test successful",
+		"host":    request.Host,
+		"port":    request.Port,
+		"stats":   stats,
+	})
+}
+
+// 获取连接统计信息
+func (h *VPNHandler) GetConnectionStats(c *gin.Context) {
+	diagnostics := vpn.NewConnectionDiagnostics(h.logger)
+	stats := diagnostics.GetConnectionStats()
+
+	c.JSON(http.StatusOK, gin.H{
+		"stats": stats,
+	})
+}
