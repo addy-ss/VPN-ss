@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
@@ -192,6 +193,16 @@ func (p *ProxyServer) readDecryptedTarget(conn net.Conn, decryptor cipher.AEAD) 
 	// 设置读取超时，防止长时间等待
 	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 
+	// 读取nonce
+	nonceSize := decryptor.NonceSize()
+	nonce := make([]byte, nonceSize)
+	if _, err := io.ReadFull(conn, nonce); err != nil {
+		if err == io.EOF {
+			return "", fmt.Errorf("connection closed by client before reading nonce: %v", err)
+		}
+		return "", fmt.Errorf("failed to read nonce: %v", err)
+	}
+
 	// 读取加密数据长度
 	lengthBuf := make([]byte, 2)
 	if _, err := io.ReadFull(conn, lengthBuf); err != nil {
@@ -239,8 +250,8 @@ func (p *ProxyServer) readDecryptedTarget(conn net.Conn, decryptor cipher.AEAD) 
 		return "", fmt.Errorf("received empty encrypted data")
 	}
 
-	// 检查数据长度是否合理（至少包含nonce和最小密文）
-	minLength := decryptor.NonceSize() + decryptor.Overhead()
+	// 检查数据长度是否合理（至少包含最小密文）
+	minLength := decryptor.Overhead()
 	if len(encryptedData) < minLength {
 		return "", fmt.Errorf("encrypted data too short: got %d bytes, need at least %d bytes", len(encryptedData), minLength)
 	}
@@ -249,24 +260,15 @@ func (p *ProxyServer) readDecryptedTarget(conn net.Conn, decryptor cipher.AEAD) 
 	defer func() {
 		if r := recover(); r != nil {
 			p.logger.WithFields(logrus.Fields{
-				"panic": r,
+				"panic":       r,
 				"data_length": len(encryptedData),
-				"min_length": minLength,
+				"min_length":  minLength,
 			}).Error("Panic during decryption, this may indicate corrupted data or protocol mismatch")
 		}
 	}()
 
-	// 提取nonce
-	nonceSize := decryptor.NonceSize()
-	if len(encryptedData) < nonceSize {
-		return "", fmt.Errorf("encrypted data too short for nonce: got %d bytes, need at least %d bytes", len(encryptedData), nonceSize)
-	}
-	
-	nonce := encryptedData[:nonceSize]
-	ciphertext := encryptedData[nonceSize:]
-	
 	// 解密数据
-	decryptedData, err := decryptor.Open(nil, nonce, ciphertext, nil)
+	decryptedData, err := decryptor.Open(nil, nonce, encryptedData, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to decrypt data (length: %d): %v", len(encryptedData), err)
 	}
@@ -285,45 +287,31 @@ func (p *ProxyServer) readDecryptedTarget(conn net.Conn, decryptor cipher.AEAD) 
 			return "", fmt.Errorf("invalid IPv4 address length")
 		}
 		addr := decryptedData[1:5]
-		target = net.IP(addr).String()
+		port := binary.BigEndian.Uint16(decryptedData[5:7])
+		target = fmt.Sprintf("%s:%d", net.IP(addr).String(), port)
 	case 3: // Domain name
 		if len(decryptedData) < 4 {
 			return "", fmt.Errorf("invalid domain name length")
 		}
 		domainLen := decryptedData[1]
-		if len(decryptedData) < int(domainLen)+4 {
+		if len(decryptedData) < int(3+domainLen) {
 			return "", fmt.Errorf("invalid domain name data length")
 		}
-		domain := decryptedData[2 : 2+domainLen]
-		target = string(domain)
+		domain := string(decryptedData[2 : 2+domainLen])
+		port := binary.BigEndian.Uint16(decryptedData[2+domainLen : 4+domainLen])
+		target = fmt.Sprintf("%s:%d", domain, port)
 	case 4: // IPv6
 		if len(decryptedData) < 19 {
 			return "", fmt.Errorf("invalid IPv6 address length")
 		}
 		addr := decryptedData[1:17]
-		target = net.IP(addr).String()
+		port := binary.BigEndian.Uint16(decryptedData[17:19])
+		target = fmt.Sprintf("[%s]:%d", net.IP(addr).String(), port)
 	default:
 		return "", fmt.Errorf("unsupported address type: %d", addrType)
 	}
 
-	// 读取端口
-	portStart := 0
-	switch addrType {
-	case 1: // IPv4
-		portStart = 5
-	case 3: // Domain name
-		portStart = 2 + int(decryptedData[1])
-	case 4: // IPv6
-		portStart = 17
-	}
-
-	if len(decryptedData) < portStart+2 {
-		return "", fmt.Errorf("invalid port data length")
-	}
-
-	port := int(decryptedData[portStart])<<8 | int(decryptedData[portStart+1])
-
-	return fmt.Sprintf("%s:%d", target, port), nil
+	return target, nil
 }
 
 func (p *ProxyServer) forwardEncrypted(src, dst net.Conn, decryptor cipher.AEAD) error {
@@ -332,6 +320,14 @@ func (p *ProxyServer) forwardEncrypted(src, dst net.Conn, decryptor cipher.AEAD)
 	// 从源到目标（解密）
 	go func() {
 		for {
+			// 读取nonce
+			nonceSize := decryptor.NonceSize()
+			nonce := make([]byte, nonceSize)
+			if _, err := io.ReadFull(src, nonce); err != nil {
+				errChan <- err
+				return
+			}
+
 			// 读取长度
 			lengthBuf := make([]byte, 2)
 			if _, err := io.ReadFull(src, lengthBuf); err != nil {
@@ -352,18 +348,8 @@ func (p *ProxyServer) forwardEncrypted(src, dst net.Conn, decryptor cipher.AEAD)
 				return
 			}
 
-			// 提取nonce
-			nonceSize := decryptor.NonceSize()
-			if len(encryptedData) < nonceSize {
-				errChan <- fmt.Errorf("encrypted data too short for nonce: got %d bytes, need at least %d bytes", len(encryptedData), nonceSize)
-				return
-			}
-			
-			nonce := encryptedData[:nonceSize]
-			ciphertext := encryptedData[nonceSize:]
-			
 			// 解密数据
-			decryptedData, err := decryptor.Open(nil, nonce, ciphertext, nil)
+			decryptedData, err := decryptor.Open(nil, nonce, encryptedData, nil)
 			if err != nil {
 				errChan <- fmt.Errorf("failed to decrypt data: %v", err)
 				return
@@ -387,8 +373,19 @@ func (p *ProxyServer) forwardEncrypted(src, dst net.Conn, decryptor cipher.AEAD)
 				return
 			}
 
-			// 加密数据
-			encryptedData := decryptor.Seal(nil, nil, buffer[:n], nil)
+			// 生成nonce并加密数据
+			nonce := make([]byte, decryptor.NonceSize())
+			if _, err := rand.Read(nonce); err != nil {
+				errChan <- fmt.Errorf("failed to generate nonce: %v", err)
+				return
+			}
+			encryptedData := decryptor.Seal(nil, nonce, buffer[:n], nil)
+
+			// 写入nonce
+			if _, err := src.Write(nonce); err != nil {
+				errChan <- err
+				return
+			}
 
 			// 写入长度
 			length := len(encryptedData)

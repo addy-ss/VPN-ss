@@ -40,7 +40,7 @@ type ProxyClient struct {
 func main() {
 	// 解析命令行参数
 	var (
-		serverHost = flag.String("server", "206.190.238.198", "服务器地址")
+		serverHost = flag.String("server", "127.0.0.1", "服务器地址")
 		serverPort = flag.Int("port", 8388, "服务器端口")
 		localPort  = flag.Int("local", 1080, "本地监听端口")
 		password   = flag.String("password", "13687401432Fan!", "密码")
@@ -137,6 +137,7 @@ func (c *ProxyClient) handleConnection(localConn net.Conn) {
 		c.logger.Errorf("SOCKS5握手失败: %v", err)
 		return
 	}
+	c.logger.Infof("SOCKS5握手成功")
 
 	// 读取SOCKS5请求
 	target, err := c.readSOCKS5Request(localConn)
@@ -144,15 +145,18 @@ func (c *ProxyClient) handleConnection(localConn net.Conn) {
 		c.logger.Errorf("读取SOCKS5请求失败: %v", err)
 		return
 	}
+	c.logger.Infof("目标地址: %s", target)
 
 	// 连接服务器
 	serverAddr := fmt.Sprintf("%s:%d", c.config.ServerHost, c.config.ServerPort)
+	c.logger.Infof("正在连接服务器: %s", serverAddr)
 	serverConn, err := net.DialTimeout("tcp", serverAddr, 10*time.Second)
 	if err != nil {
 		c.logger.Errorf("连接服务器失败: %v", err)
 		return
 	}
 	defer serverConn.Close()
+	c.logger.Infof("服务器连接成功")
 
 	// 处理代理连接
 	if err := c.handleProxy(localConn, serverConn, target); err != nil {
@@ -284,30 +288,25 @@ func (c *ProxyClient) constructTargetData(target string) []byte {
 		}
 	}
 
-	c.logger.Infof("解析目标: host=%s, port=%s, portNum=%d", host, port, portNum)
-
 	// 构造地址数据
 	var addrData []byte
-	
+
 	// 检查是否为IP地址
 	if ip := net.ParseIP(host); ip != nil {
 		if ip.To4() != nil {
 			// IPv4
 			addrData = append(addrData, 0x01) // 地址类型
 			addrData = append(addrData, ip.To4()...)
-			c.logger.Infof("IPv4地址: %s", ip.String())
 		} else {
 			// IPv6
 			addrData = append(addrData, 0x04) // 地址类型
 			addrData = append(addrData, ip...)
-			c.logger.Infof("IPv6地址: %s", ip.String())
 		}
 	} else {
 		// 域名
 		addrData = append(addrData, 0x03) // 地址类型
 		addrData = append(addrData, byte(len(host)))
 		addrData = append(addrData, []byte(host)...)
-		c.logger.Infof("域名: %s", host)
 	}
 
 	// 添加端口
@@ -315,44 +314,35 @@ func (c *ProxyClient) constructTargetData(target string) []byte {
 	binary.BigEndian.PutUint16(portBytes, uint16(portNum))
 	addrData = append(addrData, portBytes...)
 
-	c.logger.Infof("构造的地址数据长度: %d", len(addrData))
 	return addrData
 }
 
 func (c *ProxyClient) handleProxy(localConn, serverConn net.Conn, target string) error {
-	// 发送salt到服务器
-	salt := make([]byte, 32)
-	if _, err := rand.Read(salt); err != nil {
-		return fmt.Errorf("生成salt失败: %v", err)
-	}
-	c.logger.Infof("生成salt: %x", salt[:8]) // 只显示前8字节用于调试
-	
-	if _, err := serverConn.Write(salt); err != nil {
-		return fmt.Errorf("发送salt失败: %v", err)
-	}
-
-	c.logger.Infof("已发送salt到服务器，长度: %d", len(salt))
+	c.logger.Infof("开始处理代理连接，目标: %s", target)
 
 	// 创建加密器
-	encryptor, err := c.createEncryptor(salt)
+	encryptor, err := c.createEncryptor(serverConn)
 	if err != nil {
 		return fmt.Errorf("创建加密器失败: %v", err)
 	}
+	c.logger.Infof("加密器创建成功")
 
 	// 构造目标地址数据
 	targetData := c.constructTargetData(target)
-	c.logger.Infof("目标地址: %s, 数据长度: %d", target, len(targetData))
-	
-	// 生成nonce
+	c.logger.Infof("目标地址数据长度: %d", len(targetData))
+
+	// 生成nonce并加密目标地址数据
 	nonce := make([]byte, encryptor.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
 		return fmt.Errorf("生成nonce失败: %v", err)
 	}
+	encryptedTarget := encryptor.Seal(nil, nonce, targetData, nil)
+	c.logger.Infof("加密后目标地址数据长度: %d", len(encryptedTarget))
 
-	// 加密目标地址数据
-	encryptedTarget := encryptor.Seal(nonce, nonce, targetData, nil)
-	
-	// 发送加密的目标地址数据
+	// 发送nonce和加密的目标地址数据
+	if _, err := serverConn.Write(nonce); err != nil {
+		return fmt.Errorf("发送nonce失败: %v", err)
+	}
 	length := len(encryptedTarget)
 	lengthBuf := []byte{byte(length >> 8), byte(length)}
 	if _, err := serverConn.Write(lengthBuf); err != nil {
@@ -361,40 +351,51 @@ func (c *ProxyClient) handleProxy(localConn, serverConn net.Conn, target string)
 	if _, err := serverConn.Write(encryptedTarget); err != nil {
 		return fmt.Errorf("发送加密目标地址失败: %v", err)
 	}
+	c.logger.Infof("目标地址数据发送成功")
 
 	// 双向转发数据
 	errChan := make(chan error, 2)
 
 	// 从本地到服务器（加密）
 	go func() {
+		c.logger.Infof("开始本地到服务器数据转发")
 		buffer := make([]byte, 8192)
 		for {
 			n, err := localConn.Read(buffer)
 			if err != nil {
+				c.logger.Errorf("读取本地数据失败: %v", err)
 				errChan <- err
 				return
 			}
 
-			// 生成nonce
+			// 生成nonce并加密数据
 			nonce := make([]byte, encryptor.NonceSize())
 			if _, err := rand.Read(nonce); err != nil {
-				errChan <- fmt.Errorf("生成nonce失败: %v", err)
+				c.logger.Errorf("生成nonce失败: %v", err)
+				errChan <- err
 				return
 			}
+			encryptedData := encryptor.Seal(nil, nonce, buffer[:n], nil)
 
-			// 加密数据
-			encryptedData := encryptor.Seal(nonce, nonce, buffer[:n], nil)
+			// 写入nonce
+			if _, err := serverConn.Write(nonce); err != nil {
+				c.logger.Errorf("写入nonce失败: %v", err)
+				errChan <- err
+				return
+			}
 
 			// 写入长度
 			length := len(encryptedData)
 			lengthBuf := []byte{byte(length >> 8), byte(length)}
 			if _, err := serverConn.Write(lengthBuf); err != nil {
+				c.logger.Errorf("写入数据长度失败: %v", err)
 				errChan <- err
 				return
 			}
 
 			// 写入加密数据
 			if _, err := serverConn.Write(encryptedData); err != nil {
+				c.logger.Errorf("写入加密数据失败: %v", err)
 				errChan <- err
 				return
 			}
@@ -403,16 +404,27 @@ func (c *ProxyClient) handleProxy(localConn, serverConn net.Conn, target string)
 
 	// 从服务器到本地（解密）
 	go func() {
+		c.logger.Infof("开始服务器到本地数据转发")
 		for {
+			// 读取nonce
+			nonce := make([]byte, encryptor.NonceSize())
+			if _, err := io.ReadFull(serverConn, nonce); err != nil {
+				c.logger.Errorf("读取nonce失败: %v", err)
+				errChan <- err
+				return
+			}
+
 			// 读取长度
 			lengthBuf := make([]byte, 2)
 			if _, err := io.ReadFull(serverConn, lengthBuf); err != nil {
+				c.logger.Errorf("读取数据长度失败: %v", err)
 				errChan <- err
 				return
 			}
 
 			length := int(lengthBuf[0])<<8 | int(lengthBuf[1])
 			if length <= 0 || length > 65535 {
+				c.logger.Errorf("无效的加密数据长度: %d", length)
 				errChan <- fmt.Errorf("无效的加密数据长度: %d", length)
 				return
 			}
@@ -420,19 +432,22 @@ func (c *ProxyClient) handleProxy(localConn, serverConn net.Conn, target string)
 			// 读取加密数据
 			encryptedData := make([]byte, length)
 			if _, err := io.ReadFull(serverConn, encryptedData); err != nil {
+				c.logger.Errorf("读取加密数据失败: %v", err)
 				errChan <- err
 				return
 			}
 
 			// 解密数据
-			decryptedData, err := encryptor.Open(nil, nil, encryptedData, nil)
+			decryptedData, err := encryptor.Open(nil, nonce, encryptedData, nil)
 			if err != nil {
+				c.logger.Errorf("解密数据失败: %v", err)
 				errChan <- fmt.Errorf("解密数据失败: %v", err)
 				return
 			}
 
 			// 写入本地连接
 			if _, err := localConn.Write(decryptedData); err != nil {
+				c.logger.Errorf("写入本地数据失败: %v", err)
 				errChan <- err
 				return
 			}
@@ -441,10 +456,22 @@ func (c *ProxyClient) handleProxy(localConn, serverConn net.Conn, target string)
 
 	// 等待任一方向出错
 	selectErr := <-errChan
+	c.logger.Infof("代理连接结束: %v", selectErr)
 	return selectErr
 }
 
-func (c *ProxyClient) createEncryptor(salt []byte) (cipher.AEAD, error) {
+func (c *ProxyClient) createEncryptor(conn net.Conn) (cipher.AEAD, error) {
+	// 生成随机salt
+	salt := make([]byte, 32)
+	if _, err := rand.Read(salt); err != nil {
+		return nil, fmt.Errorf("生成salt失败: %v", err)
+	}
+
+	// 写入salt到服务器
+	if _, err := conn.Write(salt); err != nil {
+		return nil, fmt.Errorf("写入salt失败: %v", err)
+	}
+
 	// 生成密钥
 	key := pbkdf2.Key([]byte(c.config.Password), salt, 10000, 32, sha256.New)
 
