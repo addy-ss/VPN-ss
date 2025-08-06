@@ -1,0 +1,69 @@
+# 安全配置
+security:
+  # 认证设置
+  auth:
+    enabled: true
+    jwt_secret: ""  # 留空将自动生成
+    token_expiry: 24h
+    max_login_attempts: 5
+    lockout_duration: 30m
+    
+  # 加密设置
+  encryption:
+    default_method: "aes-256-gcm"
+    pbkdf2_iterations: 10000
+    min_password_length: 12
+    require_special_chars: true
+    require_numbers: true
+    require_uppercase: true
+    require_lowercase: true
+    
+  # 访问控制
+  access_control:
+    # IP白名单（留空表示允许所有）
+    allowed_ips: []
+    # IP黑名单
+    blocked_ips: []
+    # 最大并发连接数
+    max_concurrent_connections: 1000
+    # 连接速率限制（每分钟）
+    rate_limit_per_minute: 60
+    
+  # 审计设置
+  audit:
+    enabled: true
+    log_level: "info"
+    # 审计日志保留天数
+    retention_days: 90
+    # 敏感操作记录
+    log_sensitive_operations: true
+    
+  # 网络安全
+  network:
+    # 启用TLS
+    enable_tls: false
+    # TLS证书文件
+    cert_file: ""
+    # TLS私钥文件
+    key_file: ""
+    # 强制HTTPS重定向
+    force_https: false
+    
+  # 威胁检测
+  threat_detection:
+    enabled: true
+    # 可疑活动检测
+    suspicious_activity_detection: true
+    # 异常连接检测
+    anomaly_detection: true
+    # 暴力破解检测
+    brute_force_detection: true
+    
+  # 数据保护
+  data_protection:
+    # 敏感数据加密
+    encrypt_sensitive_data: true
+    # 配置文件中密码加密
+    encrypt_config_passwords: true
+    # 日志脱敏
+    log_sanitization: true 
