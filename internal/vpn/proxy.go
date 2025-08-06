@@ -85,13 +85,16 @@ func (p *ProxyServer) acceptConnections() {
 func (p *ProxyServer) handleConnection(conn net.Conn) {
 	defer conn.Close()
 
-	// 设置超时
-	timeout := time.Duration(p.config.Timeout) * time.Second
-	conn.SetDeadline(time.Now().Add(timeout))
+	clientIP := conn.RemoteAddr().String()
+	p.logger.Infof("New connection from %s", clientIP)
+
+	// 设置初始超时时间（给客户端更多时间发送数据）
+	initialTimeout := time.Duration(30) * time.Second
+	conn.SetDeadline(time.Now().Add(initialTimeout))
 
 	// 处理代理连接
 	if err := p.handleProxy(conn); err != nil {
-		p.logger.Errorf("Failed to handle proxy connection: %v", err)
+		p.logger.Errorf("Failed to handle proxy connection from %s: %v", clientIP, err)
 	}
 }
 
@@ -148,7 +151,10 @@ func (p *ProxyServer) readDecryptedTarget(conn net.Conn, decryptor cipher.AEAD) 
 	// 读取加密数据长度
 	lengthBuf := make([]byte, 2)
 	if _, err := io.ReadFull(conn, lengthBuf); err != nil {
-		return "", err
+		if err == io.EOF {
+			return "", fmt.Errorf("connection closed by client before reading length: %v", err)
+		}
+		return "", fmt.Errorf("failed to read length field: %v", err)
 	}
 
 	length := int(lengthBuf[0])<<8 | int(lengthBuf[1])
@@ -159,7 +165,10 @@ func (p *ProxyServer) readDecryptedTarget(conn net.Conn, decryptor cipher.AEAD) 
 	// 读取加密数据
 	encryptedData := make([]byte, length)
 	if _, err := io.ReadFull(conn, encryptedData); err != nil {
-		return "", err
+		if err == io.EOF {
+			return "", fmt.Errorf("connection closed by client while reading encrypted data (expected %d bytes): %v", length, err)
+		}
+		return "", fmt.Errorf("failed to read encrypted data (expected %d bytes): %v", length, err)
 	}
 
 	// 解密数据

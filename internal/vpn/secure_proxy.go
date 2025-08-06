@@ -90,13 +90,13 @@ func (p *SecureProxyServer) handleSecureConnection(conn net.Conn) {
 	clientIP := security.GetClientIP(conn.RemoteAddr().String())
 	p.logger.Infof("New secure connection from %s", clientIP)
 
-	// 设置超时
-	timeout := time.Duration(p.config.Timeout) * time.Second
-	conn.SetDeadline(time.Now().Add(timeout))
+	// 设置初始超时时间（给客户端更多时间发送数据）
+	initialTimeout := time.Duration(30) * time.Second
+	conn.SetDeadline(time.Now().Add(initialTimeout))
 
 	// 处理加密代理连接
 	if err := p.handleSecureProxy(conn, clientIP); err != nil {
-		p.logger.Errorf("Failed to handle secure proxy connection: %v", err)
+		p.logger.Errorf("Failed to handle secure proxy connection from %s: %v", clientIP, err)
 		// 记录可疑活动
 		p.auditLogger.LogSuspiciousActivity(clientIP, "proxy_error", map[string]interface{}{
 			"error": err.Error(),
@@ -138,7 +138,10 @@ func (p *SecureProxyServer) readEncryptedTarget(conn net.Conn) ([]byte, error) {
 	// 读取加密数据长度
 	lengthBuf := make([]byte, 4)
 	if _, err := io.ReadFull(conn, lengthBuf); err != nil {
-		return nil, err
+		if err == io.EOF {
+			return nil, fmt.Errorf("connection closed by client before reading length: %v", err)
+		}
+		return nil, fmt.Errorf("failed to read length field: %v", err)
 	}
 
 	length := int(lengthBuf[0])<<24 | int(lengthBuf[1])<<16 | int(lengthBuf[2])<<8 | int(lengthBuf[3])
@@ -149,7 +152,10 @@ func (p *SecureProxyServer) readEncryptedTarget(conn net.Conn) ([]byte, error) {
 	// 读取加密数据
 	encryptedData := make([]byte, length)
 	if _, err := io.ReadFull(conn, encryptedData); err != nil {
-		return nil, err
+		if err == io.EOF {
+			return nil, fmt.Errorf("connection closed by client while reading encrypted data (expected %d bytes): %v", length, err)
+		}
+		return nil, fmt.Errorf("failed to read encrypted data (expected %d bytes): %v", length, err)
 	}
 
 	return encryptedData, nil
