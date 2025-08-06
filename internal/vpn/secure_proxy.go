@@ -130,10 +130,35 @@ func (p *SecureProxyServer) handleSecureProxy(conn net.Conn, clientIP string) er
 		return fmt.Errorf("failed to read encrypted target: %v", err)
 	}
 
+	// 重置读取超时，恢复正常模式
+	conn.SetReadDeadline(time.Time{})
+
+	// 验证加密数据的完整性
+	if len(encryptedTarget) == 0 {
+		return fmt.Errorf("received empty encrypted data")
+	}
+
+	// 检查数据长度是否合理（至少包含nonce和最小密文）
+	minLength := p.cryptoManager.GetNonceSize() + p.cryptoManager.GetOverhead()
+	if len(encryptedTarget) < minLength {
+		return fmt.Errorf("encrypted data too short: got %d bytes, need at least %d bytes", len(encryptedTarget), minLength)
+	}
+
+	// 添加panic恢复
+	defer func() {
+		if r := recover(); r != nil {
+			p.logger.WithFields(logrus.Fields{
+				"panic": r,
+				"data_length": len(encryptedTarget),
+				"min_length": minLength,
+			}).Error("Panic during decryption, this may indicate corrupted data or protocol mismatch")
+		}
+	}()
+
 	// 解密目标地址
 	target, err := p.cryptoManager.Decrypt(encryptedTarget)
 	if err != nil {
-		return fmt.Errorf("failed to decrypt target: %v", err)
+		return fmt.Errorf("failed to decrypt target (length: %d): %v", len(encryptedTarget), err)
 	}
 
 	// 连接目标服务器

@@ -116,27 +116,50 @@ func (p *ProxyServer) handleConnection(conn net.Conn) {
 }
 
 func (p *ProxyServer) handleProxy(conn net.Conn) error {
-	// 创建解密器
-	decryptor, err := p.createDecryptor(conn)
-	if err != nil {
-		return fmt.Errorf("failed to create decryptor: %v", err)
+	// 设置最大重试次数
+	maxRetries := 3
+	var lastErr error
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		// 创建解密器
+		decryptor, err := p.createDecryptor(conn)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to create decryptor (attempt %d/%d): %v", attempt, maxRetries, err)
+			if attempt < maxRetries {
+				p.logger.Warnf("Retrying connection (attempt %d/%d): %v", attempt, maxRetries, err)
+				continue
+			}
+			return lastErr
+		}
+
+		// 读取并解密目标地址
+		target, err := p.readDecryptedTarget(conn, decryptor)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to read target (attempt %d/%d): %v", attempt, maxRetries, err)
+			if attempt < maxRetries {
+				p.logger.Warnf("Retrying connection (attempt %d/%d): %v", attempt, maxRetries, err)
+				continue
+			}
+			return lastErr
+		}
+
+		// 连接目标服务器
+		targetConn, err := net.DialTimeout("tcp", target, 10*time.Second)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to connect to target %s (attempt %d/%d): %v", target, attempt, maxRetries, err)
+			if attempt < maxRetries {
+				p.logger.Warnf("Retrying connection (attempt %d/%d): %v", attempt, maxRetries, err)
+				continue
+			}
+			return lastErr
+		}
+		defer targetConn.Close()
+
+		// 双向转发数据
+		return p.forwardEncrypted(conn, targetConn, decryptor)
 	}
 
-	// 读取并解密目标地址
-	target, err := p.readDecryptedTarget(conn, decryptor)
-	if err != nil {
-		return fmt.Errorf("failed to read target: %v", err)
-	}
-
-	// 连接目标服务器
-	targetConn, err := net.DialTimeout("tcp", target, 10*time.Second)
-	if err != nil {
-		return fmt.Errorf("failed to connect to target %s: %v", target, err)
-	}
-	defer targetConn.Close()
-
-	// 双向转发数据
-	return p.forwardEncrypted(conn, targetConn, decryptor)
+	return lastErr
 }
 
 func (p *ProxyServer) createDecryptor(conn net.Conn) (cipher.AEAD, error) {
@@ -210,10 +233,32 @@ func (p *ProxyServer) readDecryptedTarget(conn net.Conn, decryptor cipher.AEAD) 
 	// 重置读取超时，恢复正常模式
 	conn.SetReadDeadline(time.Time{})
 
+	// 验证加密数据的完整性
+	if len(encryptedData) == 0 {
+		return "", fmt.Errorf("received empty encrypted data")
+	}
+
+	// 检查数据长度是否合理（至少包含nonce和最小密文）
+	minLength := decryptor.NonceSize() + decryptor.Overhead()
+	if len(encryptedData) < minLength {
+		return "", fmt.Errorf("encrypted data too short: got %d bytes, need at least %d bytes", len(encryptedData), minLength)
+	}
+
+	// 添加panic恢复
+	defer func() {
+		if r := recover(); r != nil {
+			p.logger.WithFields(logrus.Fields{
+				"panic": r,
+				"data_length": len(encryptedData),
+				"min_length": minLength,
+			}).Error("Panic during decryption, this may indicate corrupted data or protocol mismatch")
+		}
+	}()
+
 	// 解密数据
 	decryptedData, err := decryptor.Open(nil, nil, encryptedData, nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to decrypt data: %v", err)
+		return "", fmt.Errorf("failed to decrypt data (length: %d): %v", len(encryptedData), err)
 	}
 
 	// 解析目标地址

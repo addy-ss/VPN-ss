@@ -54,6 +54,54 @@ func (cd *ConnectionDiagnostics) DiagnoseConnection(clientIP string, errorMsg st
 	}
 }
 
+// DiagnoseDecryptionError 诊断解密错误
+func (cd *ConnectionDiagnostics) DiagnoseDecryptionError(clientIP string, errorMsg string, dataLength int) {
+	cd.logger.WithFields(logrus.Fields{
+		"client_ip":  clientIP,
+		"error":      errorMsg,
+		"data_length": dataLength,
+		"timestamp":  time.Now().UTC(),
+	}).Error("Decryption error detected")
+
+	// 分析可能的错误原因
+	if dataLength == 0 {
+		cd.logger.WithFields(logrus.Fields{
+			"client_ip": clientIP,
+			"issue":     "empty_data",
+			"suggestion": "Received empty data. Check if client is sending data correctly.",
+		}).Warn("Empty data received")
+	} else if dataLength < 16 { // 最小AEAD数据长度
+		cd.logger.WithFields(logrus.Fields{
+			"client_ip": clientIP,
+			"issue":     "data_too_short",
+			"suggestion": "Data too short for valid encryption. Check protocol compatibility.",
+		}).Warn("Data too short for decryption")
+	} else {
+		cd.logger.WithFields(logrus.Fields{
+			"client_ip": clientIP,
+			"issue":     "decryption_failed",
+			"suggestion": "Decryption failed. Check password, encryption method, and data integrity.",
+		}).Warn("Decryption failed")
+	}
+}
+
+// LogPanicRecovery 记录panic恢复信息
+func (cd *ConnectionDiagnostics) LogPanicRecovery(clientIP string, panic interface{}, dataLength int) {
+	cd.logger.WithFields(logrus.Fields{
+		"client_ip":  clientIP,
+		"panic":      panic,
+		"data_length": dataLength,
+		"timestamp":  time.Now().UTC(),
+	}).Error("Panic recovered during decryption")
+
+	// 提供具体的建议
+	cd.logger.WithFields(logrus.Fields{
+		"client_ip": clientIP,
+		"action":    "immediate",
+		"suggestion": "Server panic recovered. Consider restarting the service and checking client compatibility.",
+	}).Warn("Server stability concern")
+}
+
 // isEOFError 检查是否是EOF错误
 func (cd *ConnectionDiagnostics) isEOFError(errorMsg string) bool {
 	return stringContains(errorMsg, "EOF") || stringContains(errorMsg, "connection closed")

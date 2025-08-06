@@ -110,6 +110,16 @@ func (cm *CryptoManager) GetMethod() string {
 	return cm.method
 }
 
+// GetNonceSize 获取nonce大小
+func (cm *CryptoManager) GetNonceSize() int {
+	return cm.aead.NonceSize()
+}
+
+// GetOverhead 获取加密开销
+func (cm *CryptoManager) GetOverhead() int {
+	return cm.aead.Overhead()
+}
+
 // GenerateStrongPassword 生成强密码
 func GenerateStrongPassword(length int) (string, error) {
 	if length < 16 {

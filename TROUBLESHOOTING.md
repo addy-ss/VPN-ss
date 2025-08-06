@@ -51,6 +51,41 @@
 2. 验证数据完整性
 3. 更新客户端软件
 
+#### 4. Panic错误
+```
+goroutine 27 [running]:
+crypto/internal/fips140/aes/gcm.(*GCM).Open(0x4fce52?, {0x0?, 0xc00047aa00?, 0xc000356880?}, {0x0?, 0xc00047aa00?, 0xc0003ebab0?}, {0xc00002a800, 0x708, 0x708}, ...)
+        /usr/local/go/src/crypto/internal/fips140/aes/gcm/gcm.go:95 +0x3bd
+vps/internal/vpn.(*ProxyServer).readDecryptedTarget(0xc0004646c0?, {0x9f8cd8, 0xc0000522e0}, {0x9f6688, 0xc0003ce900})
+        /root/go_projects/VPN-ss/internal/vpn/proxy.go:214 +0x4a9
+```
+
+**原因分析：**
+- 加密数据损坏或不完整
+- 密钥不匹配导致解密失败
+- 协议版本不兼容
+- 内存访问错误
+- 客户端发送了无效的加密数据
+
+**解决方案：**
+1. 检查客户端和服务器配置是否一致
+2. 验证加密方法和密码设置
+3. 更新客户端软件到最新版本
+4. 检查网络连接稳定性
+5. 重启服务器服务
+
+**紧急处理：**
+```bash
+# 立即重启服务
+systemctl restart vps-vpn
+
+# 检查服务状态
+systemctl status vps-vpn
+
+# 查看详细日志
+journalctl -u vps-vpn -f
+```
+
 ### 配置优化建议
 
 #### 1. 连接监控设置
