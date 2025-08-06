@@ -168,6 +168,7 @@ func (p *ProxyServer) createDecryptor(conn net.Conn) (cipher.AEAD, error) {
 	if _, err := io.ReadFull(conn, salt); err != nil {
 		return nil, fmt.Errorf("failed to read salt: %v", err)
 	}
+	p.logger.Infof("收到salt: %x", salt[:8]) // 只显示前8字节用于调试
 
 	// 生成密钥
 	key := pbkdf2.Key([]byte(p.config.Password), salt, 10000, 32, sha256.New)
@@ -255,8 +256,17 @@ func (p *ProxyServer) readDecryptedTarget(conn net.Conn, decryptor cipher.AEAD) 
 		}
 	}()
 
+	// 提取nonce
+	nonceSize := decryptor.NonceSize()
+	if len(encryptedData) < nonceSize {
+		return "", fmt.Errorf("encrypted data too short for nonce: got %d bytes, need at least %d bytes", len(encryptedData), nonceSize)
+	}
+	
+	nonce := encryptedData[:nonceSize]
+	ciphertext := encryptedData[nonceSize:]
+	
 	// 解密数据
-	decryptedData, err := decryptor.Open(nil, nil, encryptedData, nil)
+	decryptedData, err := decryptor.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to decrypt data (length: %d): %v", len(encryptedData), err)
 	}
@@ -342,8 +352,18 @@ func (p *ProxyServer) forwardEncrypted(src, dst net.Conn, decryptor cipher.AEAD)
 				return
 			}
 
+			// 提取nonce
+			nonceSize := decryptor.NonceSize()
+			if len(encryptedData) < nonceSize {
+				errChan <- fmt.Errorf("encrypted data too short for nonce: got %d bytes, need at least %d bytes", len(encryptedData), nonceSize)
+				return
+			}
+			
+			nonce := encryptedData[:nonceSize]
+			ciphertext := encryptedData[nonceSize:]
+			
 			// 解密数据
-			decryptedData, err := decryptor.Open(nil, nil, encryptedData, nil)
+			decryptedData, err := decryptor.Open(nil, nonce, ciphertext, nil)
 			if err != nil {
 				errChan <- fmt.Errorf("failed to decrypt data: %v", err)
 				return
