@@ -398,3 +398,21 @@ sudo systemctl restart vps-vpn
 2. 检查配置文件
 3. 验证网络连接
 4. 提交Issue到项目仓库 
+
+现在让我重新编译服务器：
+cd .. && go build -o vps cmd/main.go
+
+cd .. && pkill -f vps
+
+nohup ./vps > server.log 2>&1 &
+
+现在让我重新编译并启动客户端：
+pkill -f vps-client
+ps aux | grep vps-client
+
+cd client && go build -o vps-client main.go
+cd client && nohup ./vps-client > client.log 2>&1 &
+
+
+现在让我测试连接：
+sleep 3 && curl -x socks5://127.0.0.1:1080 http://httpbin.org/ip
