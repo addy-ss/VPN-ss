@@ -7,9 +7,9 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
-	"flag"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"os/signal"
@@ -38,16 +38,11 @@ type ProxyClient struct {
 }
 
 func main() {
-	// 解析命令行参数
-	var (
-		serverHost = flag.String("server", "127.0.0.1", "服务器地址")
-		serverPort = flag.Int("port", 8388, "服务器端口")
-		localPort  = flag.Int("local", 1080, "本地监听端口")
-		password   = flag.String("password", "13687401432Fan!", "密码")
-		method     = flag.String("method", "aes-256-gcm", "加密方法")
-		timeout    = flag.Int("timeout", 300, "超时时间(秒)")
-	)
-	flag.Parse()
+	// 加载配置文件
+	config, err := LoadClientConfig("config.yaml")
+	if err != nil {
+		log.Fatalf("加载配置文件失败: %v", err)
+	}
 
 	// 初始化日志
 	logger := logrus.New()
@@ -55,16 +50,6 @@ func main() {
 		FullTimestamp: true,
 	})
 	logger.SetLevel(logrus.InfoLevel)
-
-	// 创建配置
-	config := &ClientConfig{
-		ServerHost: *serverHost,
-		ServerPort: *serverPort,
-		LocalPort:  *localPort,
-		Password:   *password,
-		Method:     *method,
-		Timeout:    *timeout,
-	}
 
 	// 创建客户端
 	client := NewProxyClient(config, logger)

@@ -74,9 +74,9 @@ check_config() {
 start_service() {
     print_info "启动VPS VPN服务..."
     
-    # 检查是否已经在运行
-    if pgrep -f "vps" > /dev/null; then
-        print_warning "服务可能已经在运行"
+    # 检查是否已经在运行（只检查服务端进程）
+    if pgrep -f "./vps$" > /dev/null; then
+        print_warning "服务端可能已经在运行"
         read -p "是否继续启动？(y/N): " -n 1 -r
         echo
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
@@ -95,14 +95,31 @@ start_service() {
     print_info "使用 Ctrl+C 停止服务"
     
     # 等待服务启动
-    sleep 2
+    sleep 3
     
     # 检查服务是否正常启动
     if curl -s http://localhost:8080/api/v1/health > /dev/null; then
-        print_success "服务启动成功！"
+        print_success "HTTP API服务启动成功！"
     else
-        print_warning "服务可能未正常启动，请检查日志"
+        print_warning "HTTP API服务可能未正常启动，请检查日志"
     fi
+    
+    # 检查Shadowsocks服务
+    if lsof -i :8388 >/dev/null 2>&1; then
+        print_success "Shadowsocks VPN服务启动成功！"
+        print_info "VPN配置信息:"
+        print_info "  端口: 8388"
+        print_info "  加密方法: aes-256-gcm"
+        print_info "  密码: 13687401432Fan!"
+    else
+        print_warning "Shadowsocks VPN服务可能未正常启动"
+    fi
+    
+    # 显示完整的服务信息
+    print_info "服务启动完成！"
+    print_info "HTTP API: http://localhost:8080/api/v1/health"
+    print_info "VPN端口: 8388"
+    print_info "客户端配置: 127.0.0.1:8388"
 }
 
 # 停止服务
@@ -158,11 +175,18 @@ check_status() {
                 print_warning "API服务无响应"
             fi
             
-            # 检查端口
-            if netstat -an 2>/dev/null | grep -q ":8388 "; then
-                print_success "Shadowsocks端口正常"
+            # 检查Shadowsocks端口
+            if lsof -i :8388 >/dev/null 2>&1; then
+                print_success "Shadowsocks端口正常 (8388)"
             else
-                print_warning "Shadowsocks端口未监听"
+                print_warning "Shadowsocks端口未监听 (8388)"
+            fi
+            
+            # 检查HTTP端口
+            if lsof -i :8080 >/dev/null 2>&1; then
+                print_success "HTTP端口正常 (8080)"
+            else
+                print_warning "HTTP端口未监听 (8080)"
             fi
         else
             print_warning "服务未运行 (PID文件存在但进程不存在)"
