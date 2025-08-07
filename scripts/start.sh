@@ -98,20 +98,59 @@ start_service() {
     sleep 3
     
     # 检查服务是否正常启动
-    if curl -s http://localhost:8080/api/v1/health > /dev/null; then
-        print_success "HTTP API服务启动成功！"
-    else
+    API_RESPONDING=false
+    for port in 8080 8081 8082 8083 8084 8085; do
+        if curl -s --connect-timeout 3 http://localhost:$port/api/v1/health > /dev/null 2>&1; then
+            print_success "HTTP API服务启动成功！(端口: $port)"
+            API_RESPONDING=true
+            break
+        fi
+    done
+    
+    if [ "$API_RESPONDING" = false ]; then
         print_warning "HTTP API服务可能未正常启动，请检查日志"
     fi
     
     # 检查Shadowsocks服务
-    if lsof -i :8388 >/dev/null 2>&1; then
-        print_success "Shadowsocks VPN服务启动成功！"
-        print_info "VPN配置信息:"
-        print_info "  端口: 8388"
-        print_info "  加密方法: aes-256-gcm"
-        print_info "  密码: 13687401432Fan!"
-    else
+    SS_RUNNING=false
+    for port in 8388 8389 8390 8391 8392 8393; do
+        if command -v ss >/dev/null 2>&1; then
+            # 使用ss命令（Linux）
+            if ss -tln | grep ":$port " >/dev/null 2>&1; then
+                print_success "Shadowsocks VPN服务启动成功！(端口: $port)"
+                print_info "VPN配置信息:"
+                print_info "  端口: $port"
+                print_info "  加密方法: aes-256-gcm"
+                print_info "  密码: 13687401432Fan!"
+                SS_RUNNING=true
+                break
+            fi
+        elif command -v netstat >/dev/null 2>&1; then
+            # 使用netstat命令
+            if netstat -tln | grep ":$port " >/dev/null 2>&1; then
+                print_success "Shadowsocks VPN服务启动成功！(端口: $port)"
+                print_info "VPN配置信息:"
+                print_info "  端口: $port"
+                print_info "  加密方法: aes-256-gcm"
+                print_info "  密码: 13687401432Fan!"
+                SS_RUNNING=true
+                break
+            fi
+        elif command -v lsof >/dev/null 2>&1; then
+            # 使用lsof命令（macOS）
+            if lsof -i :$port >/dev/null 2>&1; then
+                print_success "Shadowsocks VPN服务启动成功！(端口: $port)"
+                print_info "VPN配置信息:"
+                print_info "  端口: $port"
+                print_info "  加密方法: aes-256-gcm"
+                print_info "  密码: 13687401432Fan!"
+                SS_RUNNING=true
+                break
+            fi
+        fi
+    done
+    
+    if [ "$SS_RUNNING" = false ]; then
         print_warning "Shadowsocks VPN服务可能未正常启动"
     fi
     
@@ -168,26 +207,82 @@ check_status() {
         if kill -0 $PID 2>/dev/null; then
             print_success "服务正在运行 (PID: $PID)"
             
-            # 检查API是否响应
-            if curl -s http://localhost:8080/api/v1/health > /dev/null; then
-                print_success "API服务正常"
-            else
+            # 检查API是否响应（尝试多个可能的端口）
+            API_RESPONDING=false
+            for port in 8080 8081 8082 8083 8084 8085; do
+                if curl -s --connect-timeout 3 http://localhost:$port/api/v1/health > /dev/null 2>&1; then
+                    print_success "API服务正常 (端口: $port)"
+                    API_RESPONDING=true
+                    break
+                fi
+            done
+            
+            if [ "$API_RESPONDING" = false ]; then
                 print_warning "API服务无响应"
             fi
             
-            # 检查Shadowsocks端口
-            if lsof -i :8388 >/dev/null 2>&1; then
-                print_success "Shadowsocks端口正常 (8388)"
-            else
-                print_warning "Shadowsocks端口未监听 (8388)"
+            # 检查Shadowsocks端口（尝试多个可能的端口）
+            SS_RUNNING=false
+            for port in 8388 8389 8390 8391 8392 8393; do
+                if command -v ss >/dev/null 2>&1; then
+                    # 使用ss命令（Linux）
+                    if ss -tln | grep ":$port " >/dev/null 2>&1; then
+                        print_success "Shadowsocks端口正常 (端口: $port)"
+                        SS_RUNNING=true
+                        break
+                    fi
+                elif command -v netstat >/dev/null 2>&1; then
+                    # 使用netstat命令
+                    if netstat -tln | grep ":$port " >/dev/null 2>&1; then
+                        print_success "Shadowsocks端口正常 (端口: $port)"
+                        SS_RUNNING=true
+                        break
+                    fi
+                elif command -v lsof >/dev/null 2>&1; then
+                    # 使用lsof命令（macOS）
+                    if lsof -i :$port >/dev/null 2>&1; then
+                        print_success "Shadowsocks端口正常 (端口: $port)"
+                        SS_RUNNING=true
+                        break
+                    fi
+                fi
+            done
+            
+            if [ "$SS_RUNNING" = false ]; then
+                print_warning "Shadowsocks端口未监听"
             fi
             
-            # 检查HTTP端口
-            if lsof -i :8080 >/dev/null 2>&1; then
-                print_success "HTTP端口正常 (8080)"
-            else
-                print_warning "HTTP端口未监听 (8080)"
+            # 检查HTTP端口（尝试多个可能的端口）
+            HTTP_RUNNING=false
+            for port in 8080 8081 8082 8083 8084 8085; do
+                if command -v ss >/dev/null 2>&1; then
+                    # 使用ss命令（Linux）
+                    if ss -tln | grep ":$port " >/dev/null 2>&1; then
+                        print_success "HTTP端口正常 (端口: $port)"
+                        HTTP_RUNNING=true
+                        break
+                    fi
+                elif command -v netstat >/dev/null 2>&1; then
+                    # 使用netstat命令
+                    if netstat -tln | grep ":$port " >/dev/null 2>&1; then
+                        print_success "HTTP端口正常 (端口: $port)"
+                        HTTP_RUNNING=true
+                        break
+                    fi
+                elif command -v lsof >/dev/null 2>&1; then
+                    # 使用lsof命令（macOS）
+                    if lsof -i :$port >/dev/null 2>&1; then
+                        print_success "HTTP端口正常 (端口: $port)"
+                        HTTP_RUNNING=true
+                        break
+                    fi
+                fi
+            done
+            
+            if [ "$HTTP_RUNNING" = false ]; then
+                print_warning "HTTP端口未监听"
             fi
+            
         else
             print_warning "服务未运行 (PID文件存在但进程不存在)"
             rm -f vps.pid

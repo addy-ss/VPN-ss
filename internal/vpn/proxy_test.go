@@ -117,3 +117,70 @@ func contains(s, substr string) bool {
 					return false
 				}())))
 }
+
+// 测试多级代理配置
+func TestMultiServerProxy(t *testing.T) {
+	logger := logrus.New()
+	config := &Config{
+		Port:     8388,
+		Method:   "aes-256-gcm",
+		Password: "test-password",
+		Timeout:  300,
+		// 第二个服务端配置
+		SecondServerEnabled:  true,
+		SecondServerHost:     "127.0.0.1",
+		SecondServerPort:     8389,
+		SecondServerMethod:   "aes-256-gcm",
+		SecondServerPassword: "second-password",
+		SecondServerTimeout:  300,
+	}
+
+	server := NewProxyServer(config, logger)
+	if server == nil {
+		t.Fatal("Expected server to be created, got nil")
+	}
+
+	// 验证第二个服务端配置
+	if !server.useSecondServer {
+		t.Error("Expected second server to be enabled")
+	}
+
+	if server.secondConfig == nil {
+		t.Error("Expected second config to be created")
+	}
+
+	if server.secondConfig.Method != "aes-256-gcm" {
+		t.Errorf("Expected second server method to be aes-256-gcm, got %s", server.secondConfig.Method)
+	}
+
+	if server.secondConfig.Port != 8389 {
+		t.Errorf("Expected second server port to be 8389, got %d", server.secondConfig.Port)
+	}
+}
+
+// 测试单级代理配置（不启用第二个服务端）
+func TestSingleServerProxy(t *testing.T) {
+	logger := logrus.New()
+	config := &Config{
+		Port:     8388,
+		Method:   "aes-256-gcm",
+		Password: "test-password",
+		Timeout:  300,
+		// 不启用第二个服务端
+		SecondServerEnabled: false,
+	}
+
+	server := NewProxyServer(config, logger)
+	if server == nil {
+		t.Fatal("Expected server to be created, got nil")
+	}
+
+	// 验证第二个服务端未启用
+	if server.useSecondServer {
+		t.Error("Expected second server to be disabled")
+	}
+
+	if server.secondConfig != nil {
+		t.Error("Expected second config to be nil when disabled")
+	}
+}

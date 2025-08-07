@@ -28,6 +28,13 @@ func (h *VPNHandler) StartVPN(c *gin.Context) {
 		Method   string `json:"method" binding:"required"`
 		Password string `json:"password" binding:"required"`
 		Timeout  int    `json:"timeout"`
+		// 第二个服务端配置
+		SecondServerEnabled  bool   `json:"second_server_enabled"`
+		SecondServerHost     string `json:"second_server_host"`
+		SecondServerPort     int    `json:"second_server_port"`
+		SecondServerMethod   string `json:"second_server_method"`
+		SecondServerPassword string `json:"second_server_password"`
+		SecondServerTimeout  int    `json:"second_server_timeout"`
 	}
 
 	if err := c.ShouldBindJSON(&request); err != nil {
@@ -42,12 +49,25 @@ func (h *VPNHandler) StartVPN(c *gin.Context) {
 	if request.Timeout == 0 {
 		request.Timeout = 300
 	}
+	if request.SecondServerTimeout == 0 {
+		request.SecondServerTimeout = 300
+	}
+	if request.SecondServerMethod == "" {
+		request.SecondServerMethod = "aes-256-gcm"
+	}
 
 	config := &vpn.Config{
 		Port:     request.Port,
 		Method:   request.Method,
 		Password: request.Password,
 		Timeout:  request.Timeout,
+		// 第二个服务端配置
+		SecondServerEnabled:  request.SecondServerEnabled,
+		SecondServerHost:     request.SecondServerHost,
+		SecondServerPort:     request.SecondServerPort,
+		SecondServerMethod:   request.SecondServerMethod,
+		SecondServerPassword: request.SecondServerPassword,
+		SecondServerTimeout:  request.SecondServerTimeout,
 	}
 
 	h.proxyServer = vpn.NewProxyServer(config, h.logger)
@@ -60,11 +80,24 @@ func (h *VPNHandler) StartVPN(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	response := gin.H{
 		"message": "VPN server started successfully",
 		"port":    request.Port,
 		"method":  request.Method,
-	})
+	}
+
+	// 如果启用了第二个服务端，添加到响应中
+	if request.SecondServerEnabled {
+		response["second_server"] = gin.H{
+			"enabled": true,
+			"host":    request.SecondServerHost,
+			"port":    request.SecondServerPort,
+			"method":  request.SecondServerMethod,
+			"timeout": request.SecondServerTimeout,
+		}
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 // 停止VPN服务

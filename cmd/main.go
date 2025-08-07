@@ -55,10 +55,17 @@ func main() {
 	if config.AppConfig.Shadowsocks.Enabled {
 		// 标准Shadowsocks配置（用于标准客户端）
 		standardConfig := &vpn.Config{
-			Port:     config.AppConfig.Shadowsocks.Port,
+			Port:     config.AppConfig.Shadowsocks.Port, // 使用配置的端口
 			Method:   config.AppConfig.Shadowsocks.Method,
 			Password: config.AppConfig.Shadowsocks.Password,
 			Timeout:  config.AppConfig.Shadowsocks.Timeout,
+			// 第二个服务端配置
+			SecondServerEnabled:  config.AppConfig.SecondServer.Enabled,
+			SecondServerHost:     config.AppConfig.SecondServer.Host,
+			SecondServerPort:     config.AppConfig.SecondServer.Port,
+			SecondServerMethod:   config.AppConfig.SecondServer.Method,
+			SecondServerPassword: config.AppConfig.SecondServer.Password,
+			SecondServerTimeout:  config.AppConfig.SecondServer.Timeout,
 		}
 
 		// 自定义协议配置（用于我们的客户端）
@@ -67,6 +74,13 @@ func main() {
 			Method:   config.AppConfig.Shadowsocks.Method,
 			Password: config.AppConfig.Shadowsocks.Password,
 			Timeout:  config.AppConfig.Shadowsocks.Timeout,
+			// 第二个服务端配置
+			SecondServerEnabled:  config.AppConfig.SecondServer.Enabled,
+			SecondServerHost:     config.AppConfig.SecondServer.Host,
+			SecondServerPort:     config.AppConfig.SecondServer.Port,
+			SecondServerMethod:   config.AppConfig.SecondServer.Method,
+			SecondServerPassword: config.AppConfig.SecondServer.Password,
+			SecondServerTimeout:  config.AppConfig.SecondServer.Timeout,
 		}
 
 		// 使用标准Shadowsocks服务器（兼容标准客户端）
@@ -83,15 +97,44 @@ func main() {
 			logger.Errorf("Failed to start custom Shadowsocks server: %v", err)
 		} else {
 			logger.Infof("Custom Shadowsocks server started on port %d", customConfig.Port)
+			if config.AppConfig.SecondServer.Enabled {
+				logger.Infof("Second server forwarding enabled: %s:%d", config.AppConfig.SecondServer.Host, config.AppConfig.SecondServer.Port)
+			}
 		}
 	}
 
 	// 启动HTTP服务器
 	go func() {
 		logger.Infof("HTTP server starting on %s:%d", config.AppConfig.Server.Host, config.AppConfig.Server.Port)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Fatalf("Failed to start HTTP server: %v", err)
+
+		// 尝试启动HTTP服务器，如果端口被占用则尝试下一个端口
+		originalPort := config.AppConfig.Server.Port
+		maxRetries := 10
+
+		for i := 0; i < maxRetries; i++ {
+			port := originalPort + i
+			addr := fmt.Sprintf("%s:%d", config.AppConfig.Server.Host, port)
+
+			// 创建新的服务器实例
+			httpServer := &http.Server{
+				Addr:    addr,
+				Handler: router,
+			}
+
+			if err := httpServer.ListenAndServe(); err != nil {
+				if i == 0 {
+					logger.Warnf("Failed to start HTTP server on %s: %v, trying next port", addr, err)
+				}
+				continue
+			}
+
+			// 如果成功启动，更新配置
+			config.AppConfig.Server.Port = port
+			logger.Infof("HTTP server started successfully on %s", addr)
+			return
 		}
+
+		logger.Fatalf("Failed to start HTTP server after %d attempts", maxRetries)
 	}()
 
 	// 等待中断信号

@@ -5,7 +5,7 @@
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](docker-compose.yml)
 [![Security](https://img.shields.io/badge/Security-Audited-green.svg)](SECURITY_ANALYSIS.md)
 
-A high-performance VPN service built with Go, featuring Shadowsocks protocol support, RESTful API management, and comprehensive security features.
+A high-performance VPN service built with Go, featuring Shadowsocks protocol support, RESTful API management, comprehensive security features, and **multi-server proxy forwarding** for enhanced privacy and security.
 
 ## ✨ Features
 
@@ -17,6 +17,8 @@ A high-performance VPN service built with Go, featuring Shadowsocks protocol sup
 - ⚡ **High Performance** - Optimized for high-throughput connections
 - 🔐 **Multiple Encryption** - AES-256-GCM, ChaCha20-Poly1305 support
 - 📱 **Client Support** - Works with all major Shadowsocks clients
+- 🔄 **Multi-Server Proxy** - Forward requests through multiple servers for enhanced security
+- 🛡️ **Layered Security** - Multiple encryption layers and traffic obfuscation
 
 ## 🚀 Quick Start
 
@@ -68,6 +70,7 @@ docker run -d -p 8080:8080 -p 8388:8388 vps-vpn
 - [Security Analysis](SECURITY_ANALYSIS.md) - Security features and analysis
 - [Project Summary](PROJECT_SUMMARY.md) - Technical overview
 - [Demo Guide](DEMO.md) - Usage examples and demonstrations
+- [Multi-Server Proxy Guide](MULTI_SERVER_GUIDE.md) - Multi-level proxy configuration and usage
 
 ## 🔧 API Reference
 
@@ -81,7 +84,7 @@ curl http://localhost:8080/api/v1/health
 # Get VPN status
 curl http://localhost:8080/api/v1/vpn/status
 
-# Start VPN service
+# Start VPN service (single server)
 curl -X POST http://localhost:8080/api/v1/vpn/start \
   -H "Content-Type: application/json" \
   -d '{
@@ -89,6 +92,22 @@ curl -X POST http://localhost:8080/api/v1/vpn/start \
     "method": "aes-256-gcm",
     "password": "your-password",
     "timeout": 300
+  }'
+
+# Start VPN service with multi-server proxy
+curl -X POST http://localhost:8080/api/v1/vpn/start \
+  -H "Content-Type: application/json" \
+  -d '{
+    "port": 8388,
+    "method": "aes-256-gcm",
+    "password": "your-password",
+    "timeout": 300,
+    "second_server_enabled": true,
+    "second_server_host": "192.168.1.100",
+    "second_server_port": 8389,
+    "second_server_method": "aes-256-gcm",
+    "second_server_password": "second-server-password",
+    "second_server_timeout": 300
   }'
 
 # Generate client configuration
@@ -137,6 +156,15 @@ server:
   port: 8080
   host: "0.0.0.0"
   mode: "debug"
+
+# Multi-server proxy configuration (optional)
+second_server:
+  enabled: false   # Enable second server forwarding
+  host: "192.168.1.100"  # Second server address
+  port: 8389       # Second server port
+  method: "aes-256-gcm"  # Encryption method
+  password: "second-server-password"  # Second server password
+  timeout: 300     # Timeout in seconds
 
 shadowsocks:
   enabled: true

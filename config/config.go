@@ -7,9 +7,10 @@ import (
 )
 
 type Config struct {
-	Server      ServerConfig      `mapstructure:"server"`
-	Shadowsocks ShadowsocksConfig `mapstructure:"shadowsocks"`
-	Log         LogConfig         `mapstructure:"log"`
+	Server       ServerConfig       `mapstructure:"server"`
+	SecondServer SecondServerConfig `mapstructure:"second_server"`
+	Shadowsocks  ShadowsocksConfig  `mapstructure:"shadowsocks"`
+	Log          LogConfig          `mapstructure:"log"`
 }
 
 type ServerConfig struct {
@@ -18,6 +19,15 @@ type ServerConfig struct {
 	Mode     string `mapstructure:"mode"` // debug or release
 	CertFile string `mapstructure:"cert_file"`
 	KeyFile  string `mapstructure:"key_file"`
+}
+
+type SecondServerConfig struct {
+	Enabled  bool   `mapstructure:"enabled"`
+	Host     string `mapstructure:"host"`
+	Port     int    `mapstructure:"port"`
+	Method   string `mapstructure:"method"`
+	Password string `mapstructure:"password"`
+	Timeout  int    `mapstructure:"timeout"`
 }
 
 type ShadowsocksConfig struct {
@@ -67,6 +77,14 @@ func setDefaults() {
 	viper.SetDefault("server.port", 8080)
 	viper.SetDefault("server.host", "0.0.0.0")
 	viper.SetDefault("server.mode", "debug")
+
+	// 第二个服务端默认配置
+	viper.SetDefault("second_server.enabled", false)
+	viper.SetDefault("second_server.host", "127.0.0.1")
+	viper.SetDefault("second_server.port", 8389)
+	viper.SetDefault("second_server.method", "aes-256-gcm")
+	viper.SetDefault("second_server.password", "")
+	viper.SetDefault("second_server.timeout", 300)
 
 	viper.SetDefault("shadowsocks.enabled", true)
 	viper.SetDefault("shadowsocks.method", "aes-256-gcm")
